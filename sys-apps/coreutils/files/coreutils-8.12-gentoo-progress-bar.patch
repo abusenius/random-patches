@@ -1,0 +1,471 @@
+From aebc069c66edb2767d6056894ae2e35f14231d64 Mon Sep 17 00:00:00 2001
+From: Alex Busenius <alex.busenius@googlemail.com>
+Date: Thu, 5 May 2011 01:00:57 +0200
+Subject: [PATCH] gentoo progress bar
+
+Upstream has been contacted about this a few times ...
+
+they dont want progress bars in mv/cp:
+http://lists.gnu.org/archive/html/bug-coreutils/2003-08/msg00114.html
+http://lists.gnu.org/archive/html/bug-coreutils/2003-09/msg00083.html
+http://lists.gnu.org/archive/html/bug-coreutils/2003-09/msg00084.html
+
+but they don't seem to mind a general util ... add this to future patchset:
+http://lists.gnu.org/archive/html/bug-coreutils/2003-09/msg00101.html
+http://lists.gnu.org/archive/html/bug-coreutils/2004-02/msg00071.html
+
+---
+ src/copy.c   |  191 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++-
+ src/copy.h   |   10 +++
+ src/cp.c     |   21 ++++++-
+ src/mv.c     |   24 +++++++-
+ src/remove.h |   10 +++
+ 5 files changed, 253 insertions(+), 3 deletions(-)
+
+diff --git a/src/copy.c b/src/copy.c
+index 65566a0..0cce8bc 100644
+--- a/src/copy.c
++++ b/src/copy.c
+@@ -16,6 +16,9 @@
+ 
+ /* Extracted from cp.c and librarified by Jim Meyering.  */
+ 
++/* Initial progress bar support by Miika Pekkarinen <miipekk@ihme.org>.
++   Refactored by Alex Busenius <alex.busenius@googlemail.com>.  */
++
+ #include <config.h>
+ #include <stdio.h>
+ #include <assert.h>
+@@ -56,6 +59,9 @@
+ #include "write-any-file.h"
+ #include "areadlink.h"
+ #include "yesno.h"
++#include "xstrtol.h"
++#include "human.h"
++#include "quotearg.h"
+ 
+ #if USE_XATTR
+ # include <attr/error_context.h>
+@@ -102,6 +108,182 @@ struct dir_list
+ /* Initial size of the cp.dest_info hash table.  */
+ #define DEST_INFO_INITIAL_CAPACITY 61
+ 
++/* Size of the sampling window used to estimate copy time for progress bar */
++#define SAMPLE_MAX 10
++
++/* Contains progress bar data. */
++static struct progress_data_struct
++{
++  time_t t_start;
++  time_t t_last;
++  time_t t_now;
++  off_t last_bytes;
++  off_t curr_off;
++  int progress_bar_printed;
++  char * shortname;
++  off_t sample_window[SAMPLE_MAX];
++  off_t sample_sum;
++  int sample_count;
++  long int line_length;
++  const struct cp_options * x;
++  off_t file_size;
++  const char * src_name;
++#ifdef TIOCGWINSZ
++  struct winsize ws;
++#endif
++} progress_data;
++
++/* Shorten a string '/long path/long file' to 'long fi...'
++   Also adds padding bytes to end of the string if necessary */
++static char *
++shorten_name(const char *str, size_t max_width)
++{
++  char *shortname;
++  const char *filename;
++  size_t len;
++
++  filename = base_name (str);
++  len = strlen(filename);
++  shortname = (char *) xmalloc (max_width + 1);
++  strncpy (shortname, filename, max_width);
++  shortname[max_width] = '\0';
++  if (len > max_width)
++      memset(shortname + max_width - 3, '.', 3);
++  else
++      memset(shortname + len, ' ', max_width - len);
++
++  return shortname;
++}
++
++static void
++progress_init(const char const * src_name, const struct cp_options * x, off_t file_size)
++{
++  memset (&progress_data, 0, sizeof (progress_data));
++  if (! x || ! x->pbar_show)
++      return;
++  time (&progress_data.t_start);
++  progress_data.t_last = progress_data.t_start;
++  progress_data.x = x;
++  progress_data.file_size = file_size;
++  progress_data.src_name = src_name;
++}
++
++static bool
++progress_print()
++{
++  char str_size[LONGEST_HUMAN_READABLE + 1];
++  char str_speed[LONGEST_HUMAN_READABLE + 1];
++  char etabuf[64];
++  time_t t_temp;
++  off_t avg_sample_sum;
++
++  progress_data.sample_window[progress_data.sample_count - 1] = (progress_data.curr_off - progress_data.last_bytes) /
++                                                                (progress_data.t_now - progress_data.t_last);
++  progress_data.sample_sum += progress_data.sample_window[progress_data.sample_count - 1];
++
++  /* Calculate the remaining time */
++  avg_sample_sum = (progress_data.sample_sum / progress_data.sample_count);
++  if (avg_sample_sum <= 0)
++      avg_sample_sum = 1;
++  t_temp = (progress_data.file_size - progress_data.curr_off) / avg_sample_sum;
++
++  /* Don't print the progress bar if the estimated remaining time is low. */
++  if (progress_data.progress_bar_printed == 1 && t_temp < progress_data.x->pbar_min_est)
++      return false;
++
++  strftime(etabuf, sizeof etabuf, "%H:%M.%S",
++            gmtime(&t_temp));
++  printf (_("%s | %3lu%% | %9s | %9s/s | ETA %s\r"), progress_data.shortname,
++          (unsigned long)(progress_data.curr_off * 100 / progress_data.file_size),
++          human_readable(progress_data.file_size, str_size, human_autoscale|human_base_1024|human_space_before_unit|human_SI|human_B, 1, 1),
++          human_readable(progress_data.sample_sum / progress_data.sample_count, str_speed, human_autoscale|human_base_1024|human_space_before_unit|human_SI|human_B, 1, 1),
++          etabuf);
++  fflush (stdout);
++  return true;
++}
++
++static void
++progress_update(off_t n_read)
++{
++  /* Abort early if no progress bar is needed */
++  if (! progress_data.x || ! progress_data.x->pbar_show)
++      return;
++
++  time (&progress_data.t_now);
++  progress_data.curr_off += n_read;
++
++  if (progress_data.t_now - progress_data.t_start < progress_data.x->pbar_delay)
++      return;
++
++  if (! progress_data.progress_bar_printed)
++    {
++      /* Column width check code copied from ls.c */
++      char const *p = getenv ("COLUMNS");
++      if (p && *p)
++        {
++          long int tmp_long;
++          if (xstrtol (p, NULL, 0, &tmp_long, NULL) == LONGINT_OK
++              && 0 < tmp_long && tmp_long <= INT_MAX)
++            {
++              progress_data.line_length = tmp_long;
++            }
++          else
++            {
++              error (0, 0,
++                    _("ignoring invalid width in environment \
++                      variable COLUMNS: %s"),
++                    quotearg (p));
++            }
++        }
++
++#ifdef TIOCGWINSZ
++      if (ioctl (STDOUT_FILENO, TIOCGWINSZ, &progress_data.ws) != -1 && progress_data.ws.ws_col != 0)
++          progress_data.line_length = progress_data.ws.ws_col;
++#endif
++      if (progress_data.line_length < 50)
++          return;
++
++      /* Take a short filename for progress bar */
++      progress_data.shortname = shorten_name(progress_data.src_name, progress_data.line_length - 48);
++      progress_data.progress_bar_printed = 1;
++    }
++
++  if (progress_data.t_now == progress_data.t_last)
++      return;
++
++  if (progress_data.sample_count == SAMPLE_MAX)
++    {
++      int i;
++
++      progress_data.sample_sum -= progress_data.sample_window[0];
++      for (i = 0; i < SAMPLE_MAX - 1; i++)
++          progress_data.sample_window[i] = progress_data.sample_window[i + 1];
++    }
++  else
++    {
++      progress_data.sample_count++;
++    }
++
++  if (progress_print())
++    {
++      progress_data.progress_bar_printed = 2;
++      progress_data.t_last = progress_data.t_now;
++      progress_data.last_bytes = progress_data.curr_off;
++    }
++}
++
++static void
++progress_done()
++{
++  /* Print a newline if progress bar is enabled and has been shown */
++  if (progress_data.progress_bar_printed == 2)
++      printf ("%s | 100%%\n", progress_data.shortname);
++
++  free (progress_data.shortname);
++  progress_data.shortname = NULL;
++  progress_data.progress_bar_printed = 0;
++}
++
+ static bool copy_internal (char const *src_name, char const *dst_name,
+                            bool new_dst, dev_t device,
+                            struct dir_list *ancestors,
+@@ -229,6 +411,7 @@ sparse_copy (int src_fd, int dest_fd, char *buf, size_t buf_size,
+              file.  Unfortunately that doesn't work for certain files in
+              /proc with linux kernels from at least 2.6.9 .. 2.6.29.  */
+         }
++      progress_update(n_read);
+     }
+ 
+   return true;
+@@ -281,6 +464,7 @@ write_zeros (int fd, uint64_t n_bytes)
+       if ((full_write (fd, zeros, n)) != n)
+         return false;
+       n_bytes -= n;
++      progress_update(n);
+     }
+ 
+   return true;
+@@ -393,6 +577,9 @@ extent_copy (int src_fd, int dest_fd, char *buf, size_t buf_size,
+                 }
+             }
+ 
++          /* Update progress bar position to the correct value */
++          progress_data.curr_off = ext_start;
++
+           last_ext_start = ext_start;
+ 
+           /* Treat an unwritten but allocated extent much like a hole.
+@@ -437,7 +624,6 @@ extent_copy (int src_fd, int dest_fd, char *buf, size_t buf_size,
+ 
+       /* Release the space allocated to scan->ext_info.  */
+       extent_scan_free (&scan);
+-
+     }
+   while (! scan.hit_final_extent);
+ 
+@@ -1040,6 +1226,8 @@ copy_reg (char const *src_name, char const *dst_name,
+       buf_alloc = xmalloc (buf_size + buf_alignment_slop);
+       buf = ptr_align (buf_alloc, buf_alignment);
+ 
++      progress_init(src_name, x, src_open_sb.st_size);
++
+       if (sparse_src)
+         {
+           bool normal_copy_required;
+@@ -1167,6 +1355,7 @@ close_src_desc:
+       return_val = false;
+     }
+ 
++  progress_done();
+   free (buf_alloc);
+   free (name_alloc);
+   return return_val;
+diff --git a/src/copy.h b/src/copy.h
+index 5014ea9..48b8394 100644
+--- a/src/copy.h
++++ b/src/copy.h
+@@ -234,6 +234,16 @@ struct cp_options
+   /* If true, display the names of the files before copying them. */
+   bool verbose;
+ 
++  /* If true, display a progress bar when the following conditions are
++   * met:
++     - pbar_delay defines how many seconds to wait before considering to
++       display the progress bar
++     - pbar_min_est defines how many seconds estimated operation complete
++       time should be at least to show the progress bar. */
++  bool pbar_show;
++  int pbar_delay;
++  int pbar_min_est;
++
+   /* If true, stdin is a tty.  */
+   bool stdin_tty;
+ 
+diff --git a/src/cp.c b/src/cp.c
+index 859f21b..0c46daa 100644
+--- a/src/cp.c
++++ b/src/cp.c
+@@ -83,6 +83,14 @@ enum
+   UNLINK_DEST_BEFORE_OPENING
+ };
+ 
++/* Initial settings for progress bar when it's enabled.
++   PROGRESS_DELAY defines how many seconds to wait before even
++   considering to display a proggress bar.
++   PROGRESS_MIN_EST defines how many seconds estimated operation
++   complete time should be at least to show the progress bar. */
++#define PROGRESS_DELAY    5
++#define PROGRESS_MIN_EST  5
++
+ /* True if the kernel is SELinux enabled.  */
+ static bool selinux_enabled;
+ 
+@@ -121,6 +129,7 @@ static struct option const long_opts[] =
+   {"copy-contents", no_argument, NULL, COPY_CONTENTS_OPTION},
+   {"dereference", no_argument, NULL, 'L'},
+   {"force", no_argument, NULL, 'f'},
++  {"progress", no_argument, NULL, 'g'},
+   {"interactive", no_argument, NULL, 'i'},
+   {"link", no_argument, NULL, 'l'},
+   {"no-clobber", no_argument, NULL, 'n'},
+@@ -181,6 +190,8 @@ Mandatory arguments to long options are mandatory for short options too.\n\
+                                  opened, remove it and try again (redundant if\
+ \n\
+                                  the -n option is used)\n\
++  -g, --progress               show a progress bar if operation is going to\n\
++                                 take a long time\n\
+   -i, --interactive            prompt before overwrite (overrides a previous -n\
+ \n\
+                                   option)\n\
+@@ -810,6 +821,10 @@ cp_option_init (struct cp_options *x)
+      But POSIX requires it.  */
+   x->open_dangling_dest_symlink = getenv ("POSIXLY_CORRECT") != NULL;
+ 
++  x->pbar_show = false;
++  x->pbar_delay = PROGRESS_DELAY;
++  x->pbar_min_est = PROGRESS_MIN_EST;
++
+   x->dest_info = NULL;
+   x->src_info = NULL;
+ }
+@@ -933,7 +948,7 @@ main (int argc, char **argv)
+      we'll actually use backup_suffix_string.  */
+   backup_suffix_string = getenv ("SIMPLE_BACKUP_SUFFIX");
+ 
+-  while ((c = getopt_long (argc, argv, "abdfHilLnprst:uvxPRS:T",
++  while ((c = getopt_long (argc, argv, "abdfgHilLnprst:uvxPRS:T",
+                            long_opts, NULL))
+          != -1)
+     {
+@@ -990,6 +1005,10 @@ main (int argc, char **argv)
+           x.unlink_dest_after_failed_open = true;
+           break;
+ 
++        case 'g':
++          x.pbar_show = true;
++          break;
++
+         case 'H':
+           x.dereference = DEREF_COMMAND_LINE_ARGUMENTS;
+           break;
+diff --git a/src/mv.c b/src/mv.c
+index 66c71a4..887ff79 100644
+--- a/src/mv.c
++++ b/src/mv.c
+@@ -42,6 +42,14 @@
+   proper_name ("David MacKenzie"), \
+   proper_name ("Jim Meyering")
+ 
++/* Initial settings for progress bar when it's enabled.
++   PROGRESS_DELAY defines how many seconds to wait before even
++   considering to display a proggress bar.
++   PROGRESS_MIN_EST defines how many seconds estimated operation
++   complete time should be at least to show the progress bar. */
++#define PROGRESS_DELAY    5
++#define PROGRESS_MIN_EST  5
++
+ /* For long options that have no equivalent short option, use a
+    non-character as a pseudo short option, starting with CHAR_MAX + 1.  */
+ enum
+@@ -56,6 +64,7 @@ static struct option const long_options[] =
+ {
+   {"backup", optional_argument, NULL, 'b'},
+   {"force", no_argument, NULL, 'f'},
++  {"progress", no_argument, NULL, 'g'},
+   {"interactive", no_argument, NULL, 'i'},
+   {"no-clobber", no_argument, NULL, 'n'},
+   {"no-target-directory", no_argument, NULL, 'T'},
+@@ -83,6 +92,10 @@ rm_option_init (struct rm_options *x)
+ 
+   x->verbose = false;
+ 
++  x->pbar_show = false;
++  x->pbar_delay = PROGRESS_DELAY;
++  x->pbar_min_est = PROGRESS_MIN_EST;
++
+   /* Since this program may well have to process additional command
+      line arguments after any call to `rm', that function must preserve
+      the initial working directory, in case one of those is a
+@@ -131,6 +144,10 @@ cp_option_init (struct cp_options *x)
+   x->mode = 0;
+   x->stdin_tty = isatty (STDIN_FILENO);
+ 
++  x->pbar_show = false;
++  x->pbar_delay = PROGRESS_DELAY;
++  x->pbar_min_est = PROGRESS_MIN_EST;
++
+   x->open_dangling_dest_symlink = false;
+   x->update = false;
+   x->verbose = false;
+@@ -300,6 +317,8 @@ Mandatory arguments to long options are mandatory for short options too.\n\
+ \n\
+   -b                           like --backup but does not accept an argument\n\
+   -f, --force                  do not prompt before overwriting\n\
++  -g, --progress               show a progress bar if operation is going to\n\
++                                 take a long time\n\
+   -i, --interactive            prompt before overwrite\n\
+   -n, --no-clobber             do not overwrite an existing file\n\
+ If you specify more than one of -i, -f, -n, only the final one takes effect.\n\
+@@ -368,7 +387,7 @@ main (int argc, char **argv)
+      we'll actually use backup_suffix_string.  */
+   backup_suffix_string = getenv ("SIMPLE_BACKUP_SUFFIX");
+ 
+-  while ((c = getopt_long (argc, argv, "bfint:uvS:T", long_options, NULL))
++  while ((c = getopt_long (argc, argv, "bfgint:uvS:T", long_options, NULL))
+          != -1)
+     {
+       switch (c)
+@@ -381,6 +400,9 @@ main (int argc, char **argv)
+         case 'f':
+           x.interactive = I_ALWAYS_YES;
+           break;
++        case 'g':
++          x.pbar_show = true;
++          break;
+         case 'i':
+           x.interactive = I_ASK_USER;
+           break;
+diff --git a/src/remove.h b/src/remove.h
+index 107ed49..dec7117 100644
+--- a/src/remove.h
++++ b/src/remove.h
+@@ -59,6 +59,16 @@ struct rm_options
+   /* If true, display the name of each file removed.  */
+   bool verbose;
+ 
++  /* If true, display a progress bar when the following conditions are
++   * met:
++     - pbar_delay defines how many seconds to wait before considering to
++       display the progress bar
++     - pbar_min_est defines how many seconds estimated operation complete
++       time should be at least to show the progress bar. */
++  bool pbar_show;
++  int pbar_delay;
++  int pbar_min_est;
++
+   /* If true, treat the failure by the rm function to restore the
+      current working directory as a fatal error.  I.e., if this field
+      is true and the rm function cannot restore cwd, it must exit with
+-- 
+1.7.5.rc1
+

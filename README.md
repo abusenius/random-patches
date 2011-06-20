@@ -4,10 +4,14 @@ Random Patches
 This is a collection of my patches for various FOSS projects that are not yet (or will never be)
 accepted by upstream.
 
-The patches are organized in the way that makes them easy to use on Gentoo with recent portage
-versions -- just copy/symlink the directories in this repository to:
+The patches are organized in the way that makes them easy to apply on Gentoo using the "user
+patches" feature of portage -- just copy/symlink the directories in this repository to:
 
     /etc/portage/patches
+
+See also the [bugreport](http://bugs.gentoo.org/show_bug.cgi?id=349707#c11).
+Unfortunately, this method does not work with all ebuilds, in this case, I also provide a patched
+ebuild.
 
 
 Disclaimer:
@@ -27,4 +31,21 @@ Amarok
     nothing.
     
     Works with 2.4.1 and latest git
+
+
+Coreutils
+---------
+
+*   [Progress bar for cp and mv](http://lists.gnu.org/archive/html/bug-coreutils/2003-08/msg00114.html)
+    
+    Adds a progress bar (command line option: -g) to "cp" and "mv"
+    
+    This patch was included by default in Gentoo some years ago, but was dropped from the patchset
+    because the upstream did not want to accept it.
+    I keep the patch up-to-date.
+    
+    Coreutils ebuild does not apply user patches
+    
+    Works with 8.12
+
 
