@@ -1,13 +1,13 @@
-From 901f6ee8b20871bb8dcadc37298c327d0e1b2b4e Mon Sep 17 00:00:00 2001
+From 5184c15637c16951705792b3523dfbab33404b25 Mon Sep 17 00:00:00 2001
 From: Alex Busenius <alex.busenius@googlemail.com>
-Date: Thu, 9 Jun 2011 20:32:23 +0200
+Date: Tue, 9 Aug 2011 17:20:31 +0200
 Subject: [PATCH] Delete files from playlist context menu (Bug 170999)
 
 ---
  src/playlist/view/PlaylistViewCommon.cpp      |    7 ++
- src/playlist/view/listview/PrettyListView.cpp |  143 +++++++++++++++++++++++++
+ src/playlist/view/listview/PrettyListView.cpp |  144 ++++++++++++++++++++++++++++++++++++++++++++
  src/playlist/view/listview/PrettyListView.h   |    9 ++
- 3 files changed, 159 insertions(+), 0 deletions(-)
+ 3 files changed, 160 insertions(+), 0 deletions(-)
 
 diff --git a/src/playlist/view/PlaylistViewCommon.cpp b/src/playlist/view/PlaylistViewCommon.cpp
 index db300a3..b13676b 100644
@@ -35,14 +35,15 @@ index db300a3..b13676b 100644
      editAction->setProperty( "popupdropper_svg_id", "edit" );
      QObject::connect( editAction, SIGNAL( triggered() ), parent, SLOT( editTrackInformation() ) );
 diff --git a/src/playlist/view/listview/PrettyListView.cpp b/src/playlist/view/listview/PrettyListView.cpp
-index 9ce6573..75a249e 100644
+index 9ce6573..074e990 100644
 --- a/src/playlist/view/listview/PrettyListView.cpp
 +++ b/src/playlist/view/listview/PrettyListView.cpp
-@@ -49,10 +49,15 @@
+@@ -49,10 +49,16 @@
  #include "PopupDropperFactory.h"
  #include "SvgHandler.h"
  #include "SourceSelectionPopup.h"
-+#include "statusbar/StatusBar.h"
++#include "core/interfaces/Logger.h"
++#include "core/support/Components.h"
  
  #include <KApplication>
  #include <KMenu>
@@ -54,7 +55,7 @@ index 9ce6573..75a249e 100644
  
  #include <QClipboard>
  #include <QContextMenuEvent>
-@@ -67,6 +72,8 @@
+@@ -67,6 +73,8 @@
  #include <QPersistentModelIndex>
  #include <QScrollBar>
  #include <QTimer>
@@ -63,7 +64,7 @@ index 9ce6573..75a249e 100644
  
  Playlist::PrettyListView::PrettyListView( QWidget* parent )
          : QListView( parent )
-@@ -449,6 +456,142 @@ Playlist::PrettyListView::findInSource()
+@@ -449,6 +457,142 @@ Playlist::PrettyListView::findInSource()
  }
  
  void
@@ -127,7 +128,7 @@ index 9ce6573..75a249e 100644
 +            if( max == 0 && !actualTracks.isEmpty() )
 +                name += " ...";
 +        }
-+        The::statusBar()->newProgressOperation( job, i18n( "Moving to trash: %1", name ) );
++        Amarok::Components::logger()->newProgressOperation( job, i18n( "Moving to trash: %1", name ) );
 +    } else {
 +        // ask for confirmation, if needed
 +        if (askConfirm && !reallyDelete(tracks))
@@ -253,5 +254,5 @@ index f22a7c8..1296aa9 100644
      QList<int> selectedRows() const;
  };
 -- 
-1.7.5.3
+1.7.6
 
