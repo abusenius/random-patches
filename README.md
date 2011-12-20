@@ -30,7 +30,7 @@ Amarok
     the playlist even if some of them were not files or could not be deleted, but it is better than
     nothing.
     
-    Works with 2.4.1 and latest git
+    Works with 2.4.3 - 2.5 and latest git
 
 
 Coreutils
@@ -46,6 +46,6 @@ Coreutils
     
     Coreutils ebuild does not apply user patches
     
-    Works with 8.12
+    Works with 8.12 - 8.14
 
 
