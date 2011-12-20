@@ -1,0 +1,258 @@
+From 4e174b826f0bd739d62170c7bcf13f80f79ab151 Mon Sep 17 00:00:00 2001
+From: Alex Busenius <alex.busenius@googlemail.com>
+Date: Thu, 9 Jun 2011 20:32:23 +0200
+Subject: [PATCH] Delete files from playlist context menu (Bug 170999)
+
+---
+ src/playlist/view/PlaylistViewCommon.cpp      |    7 ++
+ src/playlist/view/listview/PrettyListView.cpp |  144 +++++++++++++++++++++++++
+ src/playlist/view/listview/PrettyListView.h   |    9 ++
+ 3 files changed, 160 insertions(+), 0 deletions(-)
+
+diff --git a/src/playlist/view/PlaylistViewCommon.cpp b/src/playlist/view/PlaylistViewCommon.cpp
+index fc719a7..f963874 100644
+--- a/src/playlist/view/PlaylistViewCommon.cpp
++++ b/src/playlist/view/PlaylistViewCommon.cpp
+@@ -34,6 +34,7 @@
+ #include <QModelIndex>
+ 
+ #include <KMenu>
++#include <KAction>
+ 
+ 
+ Playlist::ViewCommon::ViewCommon()
+@@ -248,6 +249,12 @@ Playlist::ViewCommon::editActionsFor( QWidget *parent, const QModelIndex *index
+ 
+     Meta::TrackPtr track = index->data( Playlist::TrackRole ).value< Meta::TrackPtr >();
+ 
++    KAction *deleteAction = new KAction( KIcon( "remove-amarok" ), i18n( "Delete Tracks" ), parent );
++    deleteAction->setProperty( "popupdropper_svg_id", "delete" );
++    QObject::connect( deleteAction, SIGNAL( triggered(Qt::MouseButtons, Qt::KeyboardModifiers) ),
++                      parent, SLOT( removeTracks(Qt::MouseButtons, Qt::KeyboardModifiers) ) );
++    actions << deleteAction;
++
+     QAction *editAction = new QAction( KIcon( "media-track-edit-amarok" ),
+                                        i18n( "Edit Track Details" ), parent );
+     editAction->setProperty( "popupdropper_svg_id", "edit" );
+diff --git a/src/playlist/view/listview/PrettyListView.cpp b/src/playlist/view/listview/PrettyListView.cpp
+index 9ce6573..074e990 100644
+--- a/src/playlist/view/listview/PrettyListView.cpp
++++ b/src/playlist/view/listview/PrettyListView.cpp
+@@ -49,10 +49,16 @@
+ #include "PopupDropperFactory.h"
+ #include "SvgHandler.h"
+ #include "SourceSelectionPopup.h"
++#include "core/interfaces/Logger.h"
++#include "core/support/Components.h"
+ 
+ #include <KApplication>
+ #include <KMenu>
+ #include <KUrl>
++#include <KAction>
++#include <KIO/CopyJob>
++#include <KStandardGuiItem>
++#include <KMessageBox>
+ 
+ #include <QClipboard>
+ #include <QContextMenuEvent>
+@@ -67,6 +73,8 @@
+ #include <QPersistentModelIndex>
+ #include <QScrollBar>
+ #include <QTimer>
++#include <QFile>
++#include <QSet>
+ 
+ Playlist::PrettyListView::PrettyListView( QWidget* parent )
+         : QListView( parent )
+@@ -449,6 +457,142 @@ Playlist::PrettyListView::findInSource()
+ }
+ 
+ void
++Playlist::PrettyListView::removeTracks( Qt::MouseButtons buttons, Qt::KeyboardModifiers modifiers )
++{
++    Q_UNUSED( buttons );
++
++    Meta::TrackList tl;
++    foreach( const QModelIndex &index, selectedIndexes() ) {
++        tl.append( index.data( TrackRole ).value<Meta::TrackPtr>() );
++    }
++
++    KAction *action = qobject_cast<KAction*>( sender() );
++    if( action ) {
++        bool skipTrash = modifiers.testFlag( Qt::ShiftModifier );
++        bool skipConfirm = modifiers.testFlag( Qt::ControlModifier );
++        if (removeTracks( tl, !skipTrash, !skipConfirm )) {
++            removeSelection();
++        }
++    }
++}
++
++bool
++Playlist::PrettyListView::removeTracks( const Meta::TrackList & tracks, bool useTrash, bool askConfirm )
++{
++    Meta::TrackList actualTracks;
++    QSet<KUrl> files;
++    foreach (const Meta::TrackPtr & tr, tracks) {
++        KUrl url = tr->playableUrl();
++        if(QFile::exists(url.toLocalFile())) {
++            debug() << "Preparing to delete: " << tr->prettyUrl();
++            files << url;
++            actualTracks << tr;
++        } else {
++            warning() << "Warning: file does not exist: " << url.toLocalFile();
++            // TODO handle errors somehow, do not delete these tracks from the playlist
++        }
++    }
++
++    if (files.isEmpty())
++        return false;
++
++    if (useTrash) {
++        // ask for confirmation, if needed
++        if (askConfirm && !reallyTrash(tracks))
++            return false;
++
++        // copy-pasted from TrashCollectionLocation::copyUrlsToCollection(...)
++        KIO::CopyJob *job = KIO::trash( files.toList(), KIO::HideProgressInfo );
++        connect( job, SIGNAL(result(KJob*)), SLOT(slotTrashJobFinished(KJob*)) );
++        m_trashJobs.insert( job, tracks );
++
++        QString name = actualTracks.takeFirst()->prettyName();
++        if( !actualTracks.isEmpty() ) {
++            int max = 3;
++            while( !actualTracks.isEmpty() && (max > 0) ) {
++                name += QString( ", %1" ).arg( actualTracks.takeFirst()->prettyName() );
++                --max;
++            }
++
++            if( max == 0 && !actualTracks.isEmpty() )
++                name += " ...";
++        }
++        Amarok::Components::logger()->newProgressOperation( job, i18n( "Moving to trash: %1", name ) );
++    } else {
++        // ask for confirmation, if needed
++        if (askConfirm && !reallyDelete(tracks))
++            return false;
++
++        foreach (const KUrl & url, files) {
++            if (!QFile::remove(url.toLocalFile())) {
++                warning() << "Warning: Could not remove: " << url.toLocalFile();
++            }
++        }
++    }
++    return true;
++}
++
++bool
++Playlist::PrettyListView::reallyTrash( const Meta::TrackList & tracks ) const
++{
++    // stolen from CollectionLocationDelegateImpl::reallyTrash(...)
++    QStringList files;
++    foreach( Meta::TrackPtr track, tracks )
++        files << track->prettyUrl();
++
++    const QString text( i18ncp( "@info",
++                                "Do you really want to move this track to the trash? "
++                                "It will be removed from disk as well as your collection.",
++                                "Do you really want to move these %1 tracks to the trash? "
++                                "They will be removed from disk as well as your collection.",
++                                tracks.count() ) );
++    const bool rm = KMessageBox::warningContinueCancelList(
++                                0,
++                                text,
++                                files,
++                                i18nc( "@title:window", "Confirm Move to Trash" ),
++                                KStandardGuiItem::remove() ) == KMessageBox::Continue;
++    return rm;
++}
++
++bool
++Playlist::PrettyListView::reallyDelete( const Meta::TrackList & tracks ) const
++{
++    // stolen from CollectionLocationDelegateImpl::reallyDelete(...)
++    QStringList files;
++    foreach( Meta::TrackPtr track, tracks )
++        files << track->prettyUrl();
++
++    // NOTE: taken from SqlCollection
++    // TODO put the delete confirmation code somewhere else?
++    const QString text( i18ncp( "@info", "Do you really want to delete this track? It will be removed from disk as well as your collection.",
++                                "Do you really want to delete these %1 tracks? They will be removed from disk as well as your collection.", tracks.count() ) );
++    const bool del = KMessageBox::warningContinueCancelList(0,
++                                                     text,
++                                                     files,
++                                                     i18n("Delete Files"),
++                                                     KStandardGuiItem::del() ) == KMessageBox::Continue;
++
++    return del;
++}
++
++void
++Playlist::PrettyListView::slotTrashJobFinished( KJob *job )
++{
++    if ( job->error() ) {
++        warning() << "An error occurred when moving a file to trash: " << job->errorString();
++    } else {
++        foreach( Meta::TrackPtr track, m_trashJobs.value( job ) ) {
++            // TODO this is probably a good place to remove the track from collection
++            debug() << "Removed: " << track->prettyUrl();
++        }
++    }
++
++    m_trashJobs.remove( job );
++    job->deleteLater();
++}
++
++void
+ Playlist::PrettyListView::dragEnterEvent( QDragEnterEvent *event )
+ {
+     const QMimeData *mime = event->mimeData();
+diff --git a/src/playlist/view/listview/PrettyListView.h b/src/playlist/view/listview/PrettyListView.h
+index f22a7c8..1296aa9 100644
+--- a/src/playlist/view/listview/PrettyListView.h
++++ b/src/playlist/view/listview/PrettyListView.h
+@@ -32,6 +32,7 @@
+ 
+ #include <QAction>
+ #include <QTimer>
++#include <QHash>
+ 
+ class PopupDropper;
+ class QContextMenuEvent;
+@@ -42,6 +43,7 @@ class QKeyEvent;
+ class QMouseEvent;
+ class QPaintEvent;
+ class QTimer;
++class KJob;
+ 
+ namespace Playlist
+ {
+@@ -116,11 +118,16 @@ private slots:
+     void redrawActive();
+     void playlistLayoutChanged();
+     void findInSource();
++    void removeTracks( Qt::MouseButtons buttons, Qt::KeyboardModifiers modifiers );
++    void slotTrashJobFinished( KJob * job );
+ 
+ private:
+     bool mouseEventInHeader( const QMouseEvent* ) const;
+     QItemSelectionModel::SelectionFlags headerPressSelectionCommand( const QModelIndex&, const QMouseEvent* ) const;
+     QItemSelectionModel::SelectionFlags headerReleaseSelectionCommand( const QModelIndex&, const QMouseEvent* ) const;
++    bool removeTracks( const Meta::TrackList & tracks, bool useTrash, bool askConfirm );
++    bool reallyTrash( const Meta::TrackList &tracks ) const;
++    bool reallyDelete( const Meta::TrackList & tracks ) const;
+ 
+     void startProxyUpdateTimeout();
+ 
+@@ -139,6 +146,8 @@ private:
+ 
+     QTimer *m_animationTimer;
+ 
++    QHash<KJob*, Meta::TrackList> m_trashJobs;
++
+ public:
+     QList<int> selectedRows() const;
+ };
+-- 
+1.7.8
+
