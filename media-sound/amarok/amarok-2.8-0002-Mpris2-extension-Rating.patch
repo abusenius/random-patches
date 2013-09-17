@@ -1,0 +1,92 @@
+From 92095999133ee5dc83ec34e632ce6b3d85675bd5 Mon Sep 17 00:00:00 2001
+From: Alex Busenius <alex.busenius@googlemail.com>
+Date: Tue, 17 Sep 2013 21:23:08 +0200
+Subject: [PATCH 2/2] Mpris2 extension Rating
+
+---
+ src/dbus/mpris2/MediaPlayer2AmarokExtensions.cpp   | 24 ++++++++++++++++++++++
+ src/dbus/mpris2/MediaPlayer2AmarokExtensions.h     |  4 ++++
+ .../org.kde.amarok.Mpris2Extensions.Player.xml     |  4 ++++
+ 3 files changed, 32 insertions(+)
+
+diff --git a/src/dbus/mpris2/MediaPlayer2AmarokExtensions.cpp b/src/dbus/mpris2/MediaPlayer2AmarokExtensions.cpp
+index ba8b54e..e18c4cd 100644
+--- a/src/dbus/mpris2/MediaPlayer2AmarokExtensions.cpp
++++ b/src/dbus/mpris2/MediaPlayer2AmarokExtensions.cpp
+@@ -25,6 +25,8 @@
+ #include "core/support/Debug.h"
+ #include "EngineController.h"
+ #include "playlist/PlaylistActions.h"
++#include "core/meta/Statistics.h"
++#include "widgets/Osd.h"
+ 
+ using namespace Amarok;
+ 
+@@ -50,6 +52,28 @@ void MediaPlayer2AmarokExtensions::setMuted( bool muted )
+     The::engineController()->setMuted( muted );
+ }
+ 
++int MediaPlayer2AmarokExtensions::Rating() const
++{
++    Meta::TrackPtr currentTrack = The::engineController()->currentTrack();
++    if (currentTrack) {
++        Meta::StatisticsPtr statistics = currentTrack->statistics();
++        return statistics->rating();
++    }
++    return -1;
++}
++
++void MediaPlayer2AmarokExtensions::setRating( int rating )
++{
++    if (rating >= 0 && rating <= 10) {
++        Meta::TrackPtr currentTrack = The::engineController()->currentTrack();
++        if (currentTrack) {
++            Meta::StatisticsPtr statistics = currentTrack->statistics();
++            statistics->setRating(rating);
++            Amarok::OSD::instance()->OSDWidget::ratingChanged(statistics->rating());
++        }
++    }
++}
++
+ void MediaPlayer2AmarokExtensions::StopAfterCurrent()
+ {
+     The::playlistActions()->stopAfterPlayingTrack();
+diff --git a/src/dbus/mpris2/MediaPlayer2AmarokExtensions.h b/src/dbus/mpris2/MediaPlayer2AmarokExtensions.h
+index 964c7b8..bfe32e2 100644
+--- a/src/dbus/mpris2/MediaPlayer2AmarokExtensions.h
++++ b/src/dbus/mpris2/MediaPlayer2AmarokExtensions.h
+@@ -34,6 +34,7 @@ namespace Amarok
+         Q_CLASSINFO("D-Bus Interface", "org.kde.amarok.Mpris2Extensions.Player")
+ 
+         Q_PROPERTY( bool Muted READ Muted WRITE setMuted )
++        Q_PROPERTY( int Rating READ Rating WRITE setRating )
+ 
+         public:
+             explicit MediaPlayer2AmarokExtensions( QObject* parent );
+@@ -42,6 +43,9 @@ namespace Amarok
+             bool Muted() const;
+             void setMuted( bool muted );
+ 
++            int Rating() const;
++            void setRating( int rating );
++
+         public Q_SLOTS:
+             void StopAfterCurrent();
+             void AdjustVolume( double IncreaseBy );
+diff --git a/src/dbus/mpris2/org.kde.amarok.Mpris2Extensions.Player.xml b/src/dbus/mpris2/org.kde.amarok.Mpris2Extensions.Player.xml
+index 3397df4..97db251 100644
+--- a/src/dbus/mpris2/org.kde.amarok.Mpris2Extensions.Player.xml
++++ b/src/dbus/mpris2/org.kde.amarok.Mpris2Extensions.Player.xml
+@@ -18,5 +18,9 @@
+         <annotation name="org.freedesktop.DBus.Property.EmitsChangedSignal" value="true"/>
+     </property>
+ 
++    <property name="Rating" type="i" access="readwrite">
++        <annotation name="org.freedesktop.DBus.Property.EmitsChangedSignal" value="false"/>
++    </property>
++
+   </interface>
+ </node>
+-- 
+1.8.3.2
+

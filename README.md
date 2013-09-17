@@ -30,7 +30,18 @@ Amarok
     the playlist even if some of them were not files or could not be deleted, but it is better than
     nothing.
     
-    Works with 2.4.3 - 2.5 and latest git
+    Works with 2.4.3 - 2.8
+
+*   [DBus extension "Rating"](https://bugs.kde.org/show_bug.cgi?id=325021)
+    
+    Adds a DBus interface for reading and setting rating of the current track. This adds a new
+    property:
+
+    property readwrite int org.kde.amarok.Mpris2Extensions.Player.Rating
+
+    to the org.mpris.MediaPlayer2.amarok /org/mpris/MediaPlayer2 interface.
+
+    Works with 2.7 - 2.8
 
 
 Coreutils
@@ -46,6 +57,6 @@ Coreutils
     
     Coreutils ebuild does not apply user patches
     
-    Works with 8.12 - 8.14
+    Works with 8.12 - 8.21
 
 

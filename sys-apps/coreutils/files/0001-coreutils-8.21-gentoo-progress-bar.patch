@@ -1,7 +1,7 @@
-From aebc069c66edb2767d6056894ae2e35f14231d64 Mon Sep 17 00:00:00 2001
+From 746b6806a26e459029b42c874530fab46640356a Mon Sep 17 00:00:00 2001
 From: Alex Busenius <alex.busenius@googlemail.com>
-Date: Thu, 5 May 2011 01:00:57 +0200
-Subject: [PATCH] gentoo progress bar
+Date: Sat, 23 Feb 2013 13:24:57 +0100
+Subject: [PATCH] Gentoo progress bar
 
 Upstream has been contacted about this a few times ...
 
@@ -13,17 +13,16 @@ http://lists.gnu.org/archive/html/bug-coreutils/2003-09/msg00084.html
 but they don't seem to mind a general util ... add this to future patchset:
 http://lists.gnu.org/archive/html/bug-coreutils/2003-09/msg00101.html
 http://lists.gnu.org/archive/html/bug-coreutils/2004-02/msg00071.html
-
 ---
- src/copy.c   |  191 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++-
- src/copy.h   |   10 +++
- src/cp.c     |   21 ++++++-
- src/mv.c     |   24 +++++++-
- src/remove.h |   10 +++
+ src/copy.c   | 191 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++-
+ src/copy.h   |  10 ++++
+ src/cp.c     |  21 ++++++-
+ src/mv.c     |  24 +++++++-
+ src/remove.h |  10 ++++
  5 files changed, 253 insertions(+), 3 deletions(-)
 
 diff --git a/src/copy.c b/src/copy.c
-index 65566a0..0cce8bc 100644
+index 5c0ee1e..4940b03 100644
 --- a/src/copy.c
 +++ b/src/copy.c
 @@ -16,6 +16,9 @@
@@ -36,7 +35,7 @@ index 65566a0..0cce8bc 100644
  #include <config.h>
  #include <stdio.h>
  #include <assert.h>
-@@ -56,6 +59,9 @@
+@@ -61,6 +64,9 @@
  #include "write-any-file.h"
  #include "areadlink.h"
  #include "yesno.h"
@@ -46,7 +45,7 @@ index 65566a0..0cce8bc 100644
  
  #if USE_XATTR
  # include <attr/error_context.h>
-@@ -102,6 +108,182 @@ struct dir_list
+@@ -107,6 +113,182 @@ struct dir_list
  /* Initial size of the cp.dest_info hash table.  */
  #define DEST_INFO_INITIAL_CAPACITY 61
  
@@ -229,15 +228,15 @@ index 65566a0..0cce8bc 100644
  static bool copy_internal (char const *src_name, char const *dst_name,
                             bool new_dst, dev_t device,
                             struct dir_list *ancestors,
-@@ -229,6 +411,7 @@ sparse_copy (int src_fd, int dest_fd, char *buf, size_t buf_size,
-              file.  Unfortunately that doesn't work for certain files in
+@@ -214,6 +396,7 @@ sparse_copy (int src_fd, int dest_fd, char *buf, size_t buf_size,
               /proc with linux kernels from at least 2.6.9 .. 2.6.29.  */
          }
+ 
 +      progress_update(n_read);
+       *last_write_made_hole = make_hole;
      }
  
-   return true;
-@@ -281,6 +464,7 @@ write_zeros (int fd, uint64_t n_bytes)
+@@ -267,6 +450,7 @@ write_zeros (int fd, uint64_t n_bytes)
        if ((full_write (fd, zeros, n)) != n)
          return false;
        n_bytes -= n;
@@ -245,7 +244,7 @@ index 65566a0..0cce8bc 100644
      }
  
    return true;
-@@ -393,6 +577,9 @@ extent_copy (int src_fd, int dest_fd, char *buf, size_t buf_size,
+@@ -379,6 +563,9 @@ extent_copy (int src_fd, int dest_fd, char *buf, size_t buf_size,
                  }
              }
  
@@ -255,7 +254,7 @@ index 65566a0..0cce8bc 100644
            last_ext_start = ext_start;
  
            /* Treat an unwritten but allocated extent much like a hole.
-@@ -437,7 +624,6 @@ extent_copy (int src_fd, int dest_fd, char *buf, size_t buf_size,
+@@ -423,7 +610,6 @@ extent_copy (int src_fd, int dest_fd, char *buf, size_t buf_size,
  
        /* Release the space allocated to scan->ext_info.  */
        extent_scan_free (&scan);
@@ -263,7 +262,7 @@ index 65566a0..0cce8bc 100644
      }
    while (! scan.hit_final_extent);
  
-@@ -1040,6 +1226,8 @@ copy_reg (char const *src_name, char const *dst_name,
+@@ -1051,6 +1237,8 @@ copy_reg (char const *src_name, char const *dst_name,
        buf_alloc = xmalloc (buf_size + buf_alignment_slop);
        buf = ptr_align (buf_alloc, buf_alignment);
  
@@ -272,7 +271,7 @@ index 65566a0..0cce8bc 100644
        if (sparse_src)
          {
            bool normal_copy_required;
-@@ -1167,6 +1355,7 @@ close_src_desc:
+@@ -1183,6 +1371,7 @@ close_src_desc:
        return_val = false;
      }
  
@@ -281,10 +280,10 @@ index 65566a0..0cce8bc 100644
    free (name_alloc);
    return return_val;
 diff --git a/src/copy.h b/src/copy.h
-index 5014ea9..48b8394 100644
+index cf72d3c..37ba7ce 100644
 --- a/src/copy.h
 +++ b/src/copy.h
-@@ -234,6 +234,16 @@ struct cp_options
+@@ -235,6 +235,16 @@ struct cp_options
    /* If true, display the names of the files before copying them. */
    bool verbose;
  
@@ -302,7 +301,7 @@ index 5014ea9..48b8394 100644
    bool stdin_tty;
  
 diff --git a/src/cp.c b/src/cp.c
-index 859f21b..0c46daa 100644
+index e235b32..afd065f 100644
 --- a/src/cp.c
 +++ b/src/cp.c
 @@ -83,6 +83,14 @@ enum
@@ -328,16 +327,16 @@ index 859f21b..0c46daa 100644
    {"interactive", no_argument, NULL, 'i'},
    {"link", no_argument, NULL, 'l'},
    {"no-clobber", no_argument, NULL, 'n'},
-@@ -181,6 +190,8 @@ Mandatory arguments to long options are mandatory for short options too.\n\
-                                  opened, remove it and try again (redundant if\
- \n\
-                                  the -n option is used)\n\
+@@ -178,6 +187,8 @@ Copy SOURCE to DEST, or multiple SOURCE(s) to DIRECTORY.\n\
+   -f, --force                  if an existing destination file cannot be\n\
+                                  opened, remove it and try again (this option\n\
+                                  is ignored when the -n option is also used)\n\
 +  -g, --progress               show a progress bar if operation is going to\n\
 +                                 take a long time\n\
    -i, --interactive            prompt before overwrite (overrides a previous -n\
  \n\
                                    option)\n\
-@@ -810,6 +821,10 @@ cp_option_init (struct cp_options *x)
+@@ -808,6 +819,10 @@ cp_option_init (struct cp_options *x)
       But POSIX requires it.  */
    x->open_dangling_dest_symlink = getenv ("POSIXLY_CORRECT") != NULL;
  
@@ -369,7 +368,7 @@ index 859f21b..0c46daa 100644
            x.dereference = DEREF_COMMAND_LINE_ARGUMENTS;
            break;
 diff --git a/src/mv.c b/src/mv.c
-index 66c71a4..887ff79 100644
+index 1cfcd82..50faa4a 100644
 --- a/src/mv.c
 +++ b/src/mv.c
 @@ -42,6 +42,14 @@
@@ -395,7 +394,7 @@ index 66c71a4..887ff79 100644
    {"interactive", no_argument, NULL, 'i'},
    {"no-clobber", no_argument, NULL, 'n'},
    {"no-target-directory", no_argument, NULL, 'T'},
-@@ -83,6 +92,10 @@ rm_option_init (struct rm_options *x)
+@@ -84,6 +93,10 @@ rm_option_init (struct rm_options *x)
  
    x->verbose = false;
  
@@ -404,9 +403,9 @@ index 66c71a4..887ff79 100644
 +  x->pbar_min_est = PROGRESS_MIN_EST;
 +
    /* Since this program may well have to process additional command
-      line arguments after any call to `rm', that function must preserve
+      line arguments after any call to 'rm', that function must preserve
       the initial working directory, in case one of those is a
-@@ -131,6 +144,10 @@ cp_option_init (struct cp_options *x)
+@@ -133,6 +146,10 @@ cp_option_init (struct cp_options *x)
    x->mode = 0;
    x->stdin_tty = isatty (STDIN_FILENO);
  
@@ -417,7 +416,7 @@ index 66c71a4..887ff79 100644
    x->open_dangling_dest_symlink = false;
    x->update = false;
    x->verbose = false;
-@@ -300,6 +317,8 @@ Mandatory arguments to long options are mandatory for short options too.\n\
+@@ -300,6 +317,8 @@ Rename SOURCE to DEST, or move SOURCE(s) to DIRECTORY.\n\
  \n\
    -b                           like --backup but does not accept an argument\n\
    -f, --force                  do not prompt before overwriting\n\
@@ -446,10 +445,10 @@ index 66c71a4..887ff79 100644
            x.interactive = I_ASK_USER;
            break;
 diff --git a/src/remove.h b/src/remove.h
-index 107ed49..dec7117 100644
+index 9ac54d4..5205b99 100644
 --- a/src/remove.h
 +++ b/src/remove.h
-@@ -59,6 +59,16 @@ struct rm_options
+@@ -62,6 +62,16 @@ struct rm_options
    /* If true, display the name of each file removed.  */
    bool verbose;
  
@@ -467,5 +466,5 @@ index 107ed49..dec7117 100644
       current working directory as a fatal error.  I.e., if this field
       is true and the rm function cannot restore cwd, it must exit with
 -- 
-1.7.5.rc1
+1.8.1.4
 
