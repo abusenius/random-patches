@@ -57,6 +57,6 @@ Coreutils
     
     Coreutils ebuild does not apply user patches
     
-    Works with 8.21 - 8.22
+    Works with 8.21 - 8.23
 
 
