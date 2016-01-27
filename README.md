@@ -60,3 +60,12 @@ Coreutils
     Works with 8.21 - 8.23
 
 
+NVidia Binary Drivers
+---------------------
+
+    Fixes compilation issues of nvidia drivers version 355.11-r2 when used with kernel 4.4.0.  Newer
+    versions of nvidia drivers broke hibernation on my system.
+
+    Works with 355.11-r2
+
+
