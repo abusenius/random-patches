@@ -1,4 +1,4 @@
-From 746b6806a26e459029b42c874530fab46640356a Mon Sep 17 00:00:00 2001
+From a0dc1378dbc28c21865073e6be668aaebdb92e3e Mon Sep 17 00:00:00 2001
 From: Alex Busenius <alex.busenius@googlemail.com>
 Date: Sat, 23 Feb 2013 13:24:57 +0100
 Subject: [PATCH] Gentoo progress bar
@@ -22,7 +22,7 @@ http://lists.gnu.org/archive/html/bug-coreutils/2004-02/msg00071.html
  5 files changed, 253 insertions(+), 3 deletions(-)
 
 diff --git a/src/copy.c b/src/copy.c
-index 5c0ee1e..4940b03 100644
+index 557d37b..0b8b44f 100644
 --- a/src/copy.c
 +++ b/src/copy.c
 @@ -16,6 +16,9 @@
@@ -35,17 +35,17 @@ index 5c0ee1e..4940b03 100644
  #include <config.h>
  #include <stdio.h>
  #include <assert.h>
-@@ -61,6 +64,9 @@
- #include "write-any-file.h"
+@@ -62,6 +65,9 @@
  #include "areadlink.h"
  #include "yesno.h"
+ #include "selinux.h"
 +#include "xstrtol.h"
 +#include "human.h"
 +#include "quotearg.h"
  
  #if USE_XATTR
  # include <attr/error_context.h>
-@@ -107,6 +113,182 @@ struct dir_list
+@@ -108,6 +114,182 @@ struct dir_list
  /* Initial size of the cp.dest_info hash table.  */
  #define DEST_INFO_INITIAL_CAPACITY 61
  
@@ -228,7 +228,7 @@ index 5c0ee1e..4940b03 100644
  static bool copy_internal (char const *src_name, char const *dst_name,
                             bool new_dst, dev_t device,
                             struct dir_list *ancestors,
-@@ -214,6 +396,7 @@ sparse_copy (int src_fd, int dest_fd, char *buf, size_t buf_size,
+@@ -215,6 +397,7 @@ sparse_copy (int src_fd, int dest_fd, char *buf, size_t buf_size,
               /proc with linux kernels from at least 2.6.9 .. 2.6.29.  */
          }
  
@@ -236,7 +236,7 @@ index 5c0ee1e..4940b03 100644
        *last_write_made_hole = make_hole;
      }
  
-@@ -267,6 +450,7 @@ write_zeros (int fd, uint64_t n_bytes)
+@@ -268,6 +451,7 @@ write_zeros (int fd, uint64_t n_bytes)
        if ((full_write (fd, zeros, n)) != n)
          return false;
        n_bytes -= n;
@@ -244,7 +244,7 @@ index 5c0ee1e..4940b03 100644
      }
  
    return true;
-@@ -379,6 +563,9 @@ extent_copy (int src_fd, int dest_fd, char *buf, size_t buf_size,
+@@ -380,6 +564,9 @@ extent_copy (int src_fd, int dest_fd, char *buf, size_t buf_size,
                  }
              }
  
@@ -254,7 +254,7 @@ index 5c0ee1e..4940b03 100644
            last_ext_start = ext_start;
  
            /* Treat an unwritten but allocated extent much like a hole.
-@@ -423,7 +610,6 @@ extent_copy (int src_fd, int dest_fd, char *buf, size_t buf_size,
+@@ -424,7 +611,6 @@ extent_copy (int src_fd, int dest_fd, char *buf, size_t buf_size,
  
        /* Release the space allocated to scan->ext_info.  */
        extent_scan_free (&scan);
@@ -262,7 +262,7 @@ index 5c0ee1e..4940b03 100644
      }
    while (! scan.hit_final_extent);
  
-@@ -1051,6 +1237,8 @@ copy_reg (char const *src_name, char const *dst_name,
+@@ -1148,6 +1334,8 @@ copy_reg (char const *src_name, char const *dst_name,
        buf_alloc = xmalloc (buf_size + buf_alignment_slop);
        buf = ptr_align (buf_alloc, buf_alignment);
  
@@ -271,7 +271,7 @@ index 5c0ee1e..4940b03 100644
        if (sparse_src)
          {
            bool normal_copy_required;
-@@ -1183,6 +1371,7 @@ close_src_desc:
+@@ -1280,6 +1468,7 @@ close_src_desc:
        return_val = false;
      }
  
@@ -280,10 +280,10 @@ index 5c0ee1e..4940b03 100644
    free (name_alloc);
    return return_val;
 diff --git a/src/copy.h b/src/copy.h
-index cf72d3c..37ba7ce 100644
+index bf194d9..c3f57e4 100644
 --- a/src/copy.h
 +++ b/src/copy.h
-@@ -235,6 +235,16 @@ struct cp_options
+@@ -238,6 +238,16 @@ struct cp_options
    /* If true, display the names of the files before copying them. */
    bool verbose;
  
@@ -301,7 +301,7 @@ index cf72d3c..37ba7ce 100644
    bool stdin_tty;
  
 diff --git a/src/cp.c b/src/cp.c
-index e235b32..afd065f 100644
+index ee7d088..93a5e94 100644
 --- a/src/cp.c
 +++ b/src/cp.c
 @@ -83,6 +83,14 @@ enum
@@ -327,7 +327,7 @@ index e235b32..afd065f 100644
    {"interactive", no_argument, NULL, 'i'},
    {"link", no_argument, NULL, 'l'},
    {"no-clobber", no_argument, NULL, 'n'},
-@@ -178,6 +187,8 @@ Copy SOURCE to DEST, or multiple SOURCE(s) to DIRECTORY.\n\
+@@ -179,6 +188,8 @@ Copy SOURCE to DEST, or multiple SOURCE(s) to DIRECTORY.\n\
    -f, --force                  if an existing destination file cannot be\n\
                                   opened, remove it and try again (this option\n\
                                   is ignored when the -n option is also used)\n\
@@ -336,7 +336,7 @@ index e235b32..afd065f 100644
    -i, --interactive            prompt before overwrite (overrides a previous -n\
  \n\
                                    option)\n\
-@@ -808,6 +819,10 @@ cp_option_init (struct cp_options *x)
+@@ -814,6 +825,10 @@ cp_option_init (struct cp_options *x)
       But POSIX requires it.  */
    x->open_dangling_dest_symlink = getenv ("POSIXLY_CORRECT") != NULL;
  
@@ -347,16 +347,16 @@ index e235b32..afd065f 100644
    x->dest_info = NULL;
    x->src_info = NULL;
  }
-@@ -933,7 +948,7 @@ main (int argc, char **argv)
+@@ -941,7 +956,7 @@ main (int argc, char **argv)
       we'll actually use backup_suffix_string.  */
    backup_suffix_string = getenv ("SIMPLE_BACKUP_SUFFIX");
  
--  while ((c = getopt_long (argc, argv, "abdfHilLnprst:uvxPRS:T",
-+  while ((c = getopt_long (argc, argv, "abdfgHilLnprst:uvxPRS:T",
+-  while ((c = getopt_long (argc, argv, "abdfHilLnprst:uvxPRS:TZ",
++  while ((c = getopt_long (argc, argv, "abdfgHilLnprst:uvxPRS:TZ",
                             long_opts, NULL))
           != -1)
      {
-@@ -990,6 +1005,10 @@ main (int argc, char **argv)
+@@ -998,6 +1013,10 @@ main (int argc, char **argv)
            x.unlink_dest_after_failed_open = true;
            break;
  
@@ -368,7 +368,7 @@ index e235b32..afd065f 100644
            x.dereference = DEREF_COMMAND_LINE_ARGUMENTS;
            break;
 diff --git a/src/mv.c b/src/mv.c
-index 1cfcd82..50faa4a 100644
+index 1db404f..8f064d3 100644
 --- a/src/mv.c
 +++ b/src/mv.c
 @@ -42,6 +42,14 @@
@@ -386,15 +386,15 @@ index 1cfcd82..50faa4a 100644
  /* For long options that have no equivalent short option, use a
     non-character as a pseudo short option, starting with CHAR_MAX + 1.  */
  enum
-@@ -56,6 +64,7 @@ static struct option const long_options[] =
- {
+@@ -57,6 +65,7 @@ static struct option const long_options[] =
    {"backup", optional_argument, NULL, 'b'},
+   {"context", no_argument, NULL, 'Z'},
    {"force", no_argument, NULL, 'f'},
 +  {"progress", no_argument, NULL, 'g'},
    {"interactive", no_argument, NULL, 'i'},
    {"no-clobber", no_argument, NULL, 'n'},
    {"no-target-directory", no_argument, NULL, 'T'},
-@@ -84,6 +93,10 @@ rm_option_init (struct rm_options *x)
+@@ -85,6 +94,10 @@ rm_option_init (struct rm_options *x)
  
    x->verbose = false;
  
@@ -405,7 +405,7 @@ index 1cfcd82..50faa4a 100644
    /* Since this program may well have to process additional command
       line arguments after any call to 'rm', that function must preserve
       the initial working directory, in case one of those is a
-@@ -133,6 +146,10 @@ cp_option_init (struct cp_options *x)
+@@ -135,6 +148,10 @@ cp_option_init (struct cp_options *x)
    x->mode = 0;
    x->stdin_tty = isatty (STDIN_FILENO);
  
@@ -416,7 +416,7 @@ index 1cfcd82..50faa4a 100644
    x->open_dangling_dest_symlink = false;
    x->update = false;
    x->verbose = false;
-@@ -300,6 +317,8 @@ Rename SOURCE to DEST, or move SOURCE(s) to DIRECTORY.\n\
+@@ -302,6 +319,8 @@ Rename SOURCE to DEST, or move SOURCE(s) to DIRECTORY.\n\
  \n\
    -b                           like --backup but does not accept an argument\n\
    -f, --force                  do not prompt before overwriting\n\
@@ -425,16 +425,16 @@ index 1cfcd82..50faa4a 100644
    -i, --interactive            prompt before overwrite\n\
    -n, --no-clobber             do not overwrite an existing file\n\
  If you specify more than one of -i, -f, -n, only the final one takes effect.\n\
-@@ -368,7 +387,7 @@ main (int argc, char **argv)
+@@ -373,7 +392,7 @@ main (int argc, char **argv)
       we'll actually use backup_suffix_string.  */
    backup_suffix_string = getenv ("SIMPLE_BACKUP_SUFFIX");
  
--  while ((c = getopt_long (argc, argv, "bfint:uvS:T", long_options, NULL))
-+  while ((c = getopt_long (argc, argv, "bfgint:uvS:T", long_options, NULL))
+-  while ((c = getopt_long (argc, argv, "bfint:uvS:TZ", long_options, NULL))
++  while ((c = getopt_long (argc, argv, "bfgint:uvS:TZ", long_options, NULL))
           != -1)
      {
        switch (c)
-@@ -381,6 +400,9 @@ main (int argc, char **argv)
+@@ -386,6 +405,9 @@ main (int argc, char **argv)
          case 'f':
            x.interactive = I_ALWAYS_YES;
            break;
@@ -445,7 +445,7 @@ index 1cfcd82..50faa4a 100644
            x.interactive = I_ASK_USER;
            break;
 diff --git a/src/remove.h b/src/remove.h
-index 9ac54d4..5205b99 100644
+index 2563553..7a3c1ca 100644
 --- a/src/remove.h
 +++ b/src/remove.h
 @@ -62,6 +62,16 @@ struct rm_options
@@ -466,5 +466,5 @@ index 9ac54d4..5205b99 100644
       current working directory as a fatal error.  I.e., if this field
       is true and the rm function cannot restore cwd, it must exit with
 -- 
-1.8.1.4
+1.8.5.2
 
