@@ -1,28 +1,29 @@
-From 92095999133ee5dc83ec34e632ce6b3d85675bd5 Mon Sep 17 00:00:00 2001
+From 780eeb1aec29fd96cc60952adf325eabe5637212 Mon Sep 17 00:00:00 2001
 From: Alex Busenius <alex.busenius@googlemail.com>
 Date: Tue, 17 Sep 2013 21:23:08 +0200
 Subject: [PATCH 2/2] Mpris2 extension Rating
 
 ---
- src/dbus/mpris2/MediaPlayer2AmarokExtensions.cpp   | 24 ++++++++++++++++++++++
+ src/dbus/mpris2/MediaPlayer2AmarokExtensions.cpp   | 25 ++++++++++++++++++++++
  src/dbus/mpris2/MediaPlayer2AmarokExtensions.h     |  4 ++++
  .../org.kde.amarok.Mpris2Extensions.Player.xml     |  4 ++++
- 3 files changed, 32 insertions(+)
+ 3 files changed, 33 insertions(+)
 
 diff --git a/src/dbus/mpris2/MediaPlayer2AmarokExtensions.cpp b/src/dbus/mpris2/MediaPlayer2AmarokExtensions.cpp
-index ba8b54e..e18c4cd 100644
+index ba8b54e..c014acb 100644
 --- a/src/dbus/mpris2/MediaPlayer2AmarokExtensions.cpp
 +++ b/src/dbus/mpris2/MediaPlayer2AmarokExtensions.cpp
-@@ -25,6 +25,8 @@
+@@ -25,6 +25,9 @@
  #include "core/support/Debug.h"
  #include "EngineController.h"
  #include "playlist/PlaylistActions.h"
 +#include "core/meta/Statistics.h"
 +#include "widgets/Osd.h"
++#include "core/meta/Meta.h"
  
  using namespace Amarok;
  
-@@ -50,6 +52,28 @@ void MediaPlayer2AmarokExtensions::setMuted( bool muted )
+@@ -50,6 +53,28 @@ void MediaPlayer2AmarokExtensions::setMuted( bool muted )
      The::engineController()->setMuted( muted );
  }
  
