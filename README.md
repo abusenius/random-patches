@@ -63,9 +63,9 @@ Coreutils
 NVidia Binary Drivers
 ---------------------
 
-    Fixes compilation issues of nvidia drivers version 355.11-r2 when used with kernel 4.4.0.  Newer
+    Fixes compilation issues of nvidia drivers version 355.11 when used with kernels 4.6.x.  Newer
     versions of nvidia drivers broke hibernation on my system.
 
-    Works with 355.11-r2
+    Works with x11-drivers/nvidia-drivers-355.11-r4
 
 

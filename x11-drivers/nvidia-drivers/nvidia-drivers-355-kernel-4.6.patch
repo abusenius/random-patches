@@ -1,0 +1,252 @@
+From b0b070bacf712c47e4fd0c73d4238370432dcc08 Mon Sep 17 00:00:00 2001
+From: Alex Busenius <root@localhost>
+Date: Sun, 5 Jun 2016 02:34:47 +0200
+Subject: [PATCH] nvidia-drivers-355 kernel-4.6
+
+---
+ kernel/common/inc/nv-linux.h        |  1 +
+ kernel/common/inc/nv-mm.h           | 55 +++++++++++++++++++++++++++++++++++
+ kernel/conftest.sh                  | 58 +++++++++++++++++++++++++++++++++++++
+ kernel/nvidia-uvm/nvidia-uvm.Kbuild |  1 +
+ kernel/nvidia-uvm/uvm_common.c      |  2 +-
+ kernel/nvidia-uvm/uvm_lite.c        |  7 ++++-
+ kernel/nvidia/nvidia.Kbuild         |  2 ++
+ kernel/nvidia/os-mlock.c            |  6 ++--
+ 8 files changed, 127 insertions(+), 5 deletions(-)
+ create mode 100644 kernel/common/inc/nv-mm.h
+
+diff --git a/kernel/common/inc/nv-linux.h b/kernel/common/inc/nv-linux.h
+index 79bccc0..3bc0028 100644
+--- a/kernel/common/inc/nv-linux.h
++++ b/kernel/common/inc/nv-linux.h
+@@ -14,6 +14,7 @@
+ #include "nv.h"
+ #include "conftest.h"
+ 
++#include "nv-mm.h"
+ #if !defined(NV_VMWARE)
+ #define NV_KERNEL_NAME "Linux"
+ #else
+diff --git a/kernel/common/inc/nv-mm.h b/kernel/common/inc/nv-mm.h
+new file mode 100644
+index 0000000..ade903b
+--- /dev/null
++++ b/kernel/common/inc/nv-mm.h
+@@ -0,0 +1,55 @@
++/*******************************************************************************
++    Copyright (c) 2016 NVIDIA Corporation
++
++    Permission is hereby granted, free of charge, to any person obtaining a copy
++    of this software and associated documentation files (the "Software"), to
++    deal in the Software without restriction, including without limitation the
++    rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
++    sell copies of the Software, and to permit persons to whom the Software is
++    furnished to do so, subject to the following conditions:
++
++        The above copyright notice and this permission notice shall be
++        included in all copies or substantial portions of the Software.
++
++    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
++    THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
++    FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
++    DEALINGS IN THE SOFTWARE.
++
++*******************************************************************************/
++#ifndef __NV_MM_H__
++#define __NV_MM_H__
++
++/*  get_user_pages_remote() was added by:
++ *    2016 Feb 12: 1e9877902dc7e11d2be038371c6fbf2dfcd469d7
++ *
++ *  The very next commit (cde70140fed8429acf7a14e2e2cbd3e329036653)
++ *  deprecated the 8-argument version of get_user_pages for the
++ *  non-remote case (calling get_user_pages with current and current->mm).
++ *
++ *  The guidelines are: call NV_GET_USER_PAGES_REMOTE if you need the 8-argument
++ *  version that uses something other than current and current->mm. Use
++ *  NV_GET_USER_PAGES if you are refering to current and current->mm.
++ *
++*  Note that get_user_pages_remote() requires the caller to hold a reference on
++*  the task_struct (if non-NULL) and the mm_struct. This will always be true
++*  when using current and current->mm. If the kernel passes the driver a vma
++*  via driver callback, the kernel holds a reference on vma->vm_mm over that
++*  callback.
++ */
++
++#if defined(NV_GET_USER_PAGES_REMOTE_PRESENT)
++    #define NV_GET_USER_PAGES           get_user_pages
++    #define NV_GET_USER_PAGES_REMOTE    get_user_pages_remote
++#else
++    #define NV_GET_USER_PAGES(start, nr_pages, write, force, pages, vmas) \
++        get_user_pages(current, current->mm, start, nr_pages, write, force, pages, vmas)
++
++    #define NV_GET_USER_PAGES_REMOTE    get_user_pages
++#endif
++
++
++#endif // __NV_MM_H__
+diff --git a/kernel/conftest.sh b/kernel/conftest.sh
+index f0c9b79..42a2e5a 100755
+--- a/kernel/conftest.sh
++++ b/kernel/conftest.sh
+@@ -190,6 +190,47 @@ test_configuration_option() {
+ 
+ }
+ 
++compile_check_conftest() {
++    #
++    # Compile the current conftest C file and check+output the result
++    #
++    CODE="$1"
++    DEF="$2"
++    VAL="$3"
++    CAT="$4"
++
++    echo "$CONFTEST_PREAMBLE
++    $CODE" > conftest$$.c
++
++    $CC $CFLAGS -c conftest$$.c > /dev/null 2>&1
++    rm -f conftest$$.c
++
++    if [ -f conftest$$.o ]; then
++        rm -f conftest$$.o
++        if [ "${CAT}" = "functions" ]; then
++            #
++            # The logic for "functions" compilation tests is inverted compared to
++            # other compilation steps: if the function is present, the code
++            # snippet will fail to compile because the function call won't match
++            # the prototype. If the function is not present, the code snippet
++            # will produce an object file with the function as an unresolved
++            # symbol.
++            #
++            echo "#undef ${DEF}" | append_conftest "${CAT}"
++        else
++            echo "#define ${DEF} ${VAL}" | append_conftest "${CAT}"
++        fi
++        return
++    else
++        if [ "${CAT}" = "functions" ]; then
++            echo "#define ${DEF} ${VAL}" | append_conftest "${CAT}"
++        else
++            echo "#undef ${DEF}" | append_conftest "${CAT}"
++        fi
++        return
++    fi
++}
++
+ get_configuration_option() {
+     #
+     # Print the value of given configuration option, if defined
+@@ -2134,6 +2175,23 @@ compile_test() {
+             fi
+         ;;
+ 
++        get_user_pages_remote)
++            #
++            # Determine if the function get_user_pages_remote() is
++            # present.
++            #
++            # get_user_pages_remote() was added by:
++            #   2016 Feb 12: 1e9877902dc7e11d2be038371c6fbf2dfcd469d7
++            #
++            CODE="
++            #include <linux/mm.h>
++            int conftest_get_user_pages_remote(void) {
++                get_user_pages_remote();
++            }"
++
++            compile_check_conftest "$CODE" "NV_GET_USER_PAGES_REMOTE_PRESENT" "" "functions"
++        ;;
++
+     esac
+ }
+ 
+diff --git a/kernel/nvidia-uvm/nvidia-uvm.Kbuild b/kernel/nvidia-uvm/nvidia-uvm.Kbuild
+index 6a39bdc..a486ed6 100644
+--- a/kernel/nvidia-uvm/nvidia-uvm.Kbuild
++++ b/kernel/nvidia-uvm/nvidia-uvm.Kbuild
+@@ -92,3 +92,4 @@ NV_CONFTEST_TYPE_COMPILE_TESTS += kuid_t
+ NV_CONFTEST_TYPE_COMPILE_TESTS += fault_flags
+ NV_CONFTEST_TYPE_COMPILE_TESTS += atomic64_type
+ NV_CONFTEST_TYPE_COMPILE_TESTS += backing_dev_info
++NV_CONFTEST_TYPE_COMPILE_TESTS += get_user_pages_remote
+diff --git a/kernel/nvidia-uvm/uvm_common.c b/kernel/nvidia-uvm/uvm_common.c
+index a46693a..52ed6d5 100644
+--- a/kernel/nvidia-uvm/uvm_common.c
++++ b/kernel/nvidia-uvm/uvm_common.c
+@@ -60,7 +60,7 @@ static void uvmnext_exit(void)
+ {
+ 
+ }
+-static NV_STATUS uvmnext_isr_top_half(void)
++static NV_STATUS uvmnext_isr_top_half(UvmGpuUuid* pUuid)
+ {
+     return NV_ERR_NO_INTR_PENDING;
+ }
+diff --git a/kernel/nvidia-uvm/uvm_lite.c b/kernel/nvidia-uvm/uvm_lite.c
+index cbe1efd..a6cf083 100644
+--- a/kernel/nvidia-uvm/uvm_lite.c
++++ b/kernel/nvidia-uvm/uvm_lite.c
+@@ -1240,7 +1240,12 @@ int _fault_common(struct vm_area_struct *vma, unsigned long vaddr,
+         // If we already have the page, then we must have earlier copied in the
+         // data from the GPU. Therefore, avoid migrating.
+         //
+-        retValue = VM_FAULT_MINOR;
++
++        // We used to return VM_FAULT_MINOR here. However, that was deprecated
++        // in the kernel, and the new guideline is to return 0 in case of a
++        // minor fault. The VM_FAULT_MINOR symbol itself was removed in
++        // March, 2016 with commit 0e8fb9312fbaf1a687dd731b04d8ab3121c4ff5a.
++        retValue = 0;
+     }
+ 
+     // Increment the page usage count since the kernel automatically
+diff --git a/kernel/nvidia/nvidia.Kbuild b/kernel/nvidia/nvidia.Kbuild
+index b6b76b5..d69f91c 100644
+--- a/kernel/nvidia/nvidia.Kbuild
++++ b/kernel/nvidia/nvidia.Kbuild
+@@ -156,5 +156,7 @@ NV_CONFTEST_TYPE_COMPILE_TESTS += noncoherent_swiotlb_dma_ops
+ NV_CONFTEST_GENERIC_COMPILE_TESTS += dom0_kernel_present
+ NV_CONFTEST_GENERIC_COMPILE_TESTS += drm_available
+ NV_CONFTEST_GENERIC_COMPILE_TESTS += nvidia_grid_build 
++NV_CONFTEST_GENERIC_COMPILE_TESTS += get_user_pages_remote
++
+ 
+ NV_CONFTEST_MACRO_COMPILE_TESTS += INIT_WORK
+diff --git a/kernel/nvidia/os-mlock.c b/kernel/nvidia/os-mlock.c
+index 9d8b495..d83b1dc 100644
+--- a/kernel/nvidia/os-mlock.c
++++ b/kernel/nvidia/os-mlock.c
+@@ -116,7 +116,7 @@ NV_STATUS NV_API_CALL os_lock_user_pages(
+     }
+ 
+     down_read(&mm->mmap_sem);
+-    ret = get_user_pages(current, mm, (unsigned long)address,
++    ret = NV_GET_USER_PAGES((unsigned long)address,
+             page_count, write, force, user_pages, NULL);
+     up_read(&mm->mmap_sem);
+     pinned = ret;
+@@ -129,7 +129,7 @@ NV_STATUS NV_API_CALL os_lock_user_pages(
+     else if (pinned < page_count)
+     {
+         for (i = 0; i < pinned; i++)
+-            page_cache_release(user_pages[i]);
++            put_page(user_pages[i]);
+         os_free_mem(user_pages);
+         return NV_ERR_INVALID_ADDRESS;
+     }
+@@ -156,7 +156,7 @@ NV_STATUS NV_API_CALL os_unlock_user_pages(
+     {
+         if (write)
+             set_page_dirty_lock(user_pages[i]);
+-        page_cache_release(user_pages[i]);
++        put_page(user_pages[i]);
+     }
+ 
+     os_free_mem(user_pages);
+-- 
+2.8.3
+
