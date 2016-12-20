@@ -1,0 +1,56 @@
+From 488a438285dcd1451d6c008c0960b7cf7e11e32e Mon Sep 17 00:00:00 2001
+From: Alex Busenius <alex.busenius@googlemail.com>
+Date: Sun, 27 Nov 2016 15:54:02 +0100
+Subject: [PATCH] Fix removing duplicated tracks.
+
+Removing duplicates based on playable URL works better for network
+streams.
+---
+ src/playlist/PlaylistController.cpp | 21 +++++++++++----------
+ 1 file changed, 11 insertions(+), 10 deletions(-)
+
+diff --git a/src/playlist/PlaylistController.cpp b/src/playlist/PlaylistController.cpp
+index 6db6a4438a..92fb8c8d70 100644
+--- a/src/playlist/PlaylistController.cpp
++++ b/src/playlist/PlaylistController.cpp
+@@ -357,26 +357,27 @@ Controller::removeDeadAndDuplicates()
+ {
+     DEBUG_BLOCK
+ 
+-    QSet<Meta::TrackPtr> uniqueTracks = m_topModel->tracks().toSet();
++    Meta::TrackList tracks = m_topModel->tracks();
++    QSet<KUrl> uniqueUrls;
+     QList<int> topModelRowsToRemove;
+ 
+-    foreach( Meta::TrackPtr unique, uniqueTracks )
++    int row = 0;
++    foreach( Meta::TrackPtr track, tracks )
+     {
+-        QList<int> trackRows = m_topModel->allRowsForTrack( unique ).toList();
+-
+-        if( unique->playableUrl().isLocalFile() && !QFile::exists( unique->playableUrl().path() ) )
++        if( track->playableUrl().isLocalFile() && !QFile::exists( track->playableUrl().path() ) )
+         {
+             // Track is Dead
+             // TODO: Check remote files as well
+-            topModelRowsToRemove <<  trackRows;
++            topModelRowsToRemove << row;
+         }
+-        else if( trackRows.size() > 1 )
++        else if( uniqueUrls.contains( track->playableUrl() ) )
+         {
+             // Track is Duplicated
+-            // Remove all rows except the first
+-            for( QList<int>::const_iterator it = ++trackRows.constBegin(); it != trackRows.constEnd(); ++it )
+-                topModelRowsToRemove.push_back( *it );
++            topModelRowsToRemove << row;
+         }
++
++        uniqueUrls << track->playableUrl();
++        row++;
+     }
+ 
+     if( !topModelRowsToRemove.empty() )
+-- 
+2.11.0.rc2
+
