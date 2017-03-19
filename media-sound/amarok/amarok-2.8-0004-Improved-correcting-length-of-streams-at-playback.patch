@@ -1,0 +1,75 @@
+From b8869cee2457b3d836908e3c26d3c4dbb09a7308 Mon Sep 17 00:00:00 2001
+From: Alex Busenius <alex.busenius@googlemail.com>
+Date: Fri, 20 Jan 2017 00:21:54 +0100
+Subject: [PATCH] Improved correcting length of streams at playback
+
+Ignoring too small lengths sometimes reported by web radio streams.
+Updating length when the backend reports length change.
+---
+ src/EngineController.cpp             |  2 +-
+ src/core-impl/meta/stream/Stream_p.h | 22 +++++++++++++++++++++-
+ 2 files changed, 22 insertions(+), 2 deletions(-)
+
+diff --git a/src/EngineController.cpp b/src/EngineController.cpp
+index 73e9d32fc7..6d5b91ff25 100644
+--- a/src/EngineController.cpp
++++ b/src/EngineController.cpp
+@@ -721,7 +721,7 @@ EngineController::trackLength() const
+ {
+     //When starting a last.fm stream, Phonon still shows the old track's length--trust
+     //Meta::Track over Phonon
+-    if( m_currentTrack && m_currentTrack->length() > 0 )
++    if( m_currentTrack && m_currentTrack->length() > 500 )
+         return m_currentTrack->length();
+     else
+         return m_media.data()->totalTime(); //may return -1
+diff --git a/src/core-impl/meta/stream/Stream_p.h b/src/core-impl/meta/stream/Stream_p.h
+index a4378f86bd..4af537131e 100644
+--- a/src/core-impl/meta/stream/Stream_p.h
++++ b/src/core-impl/meta/stream/Stream_p.h
+@@ -48,6 +48,9 @@ class MetaStream::Track::Private : public QObject
+             connect( engine, SIGNAL(currentMetadataChanged( QVariantMap) ),
+                      this, SLOT(currentMetadataChanged( QVariantMap )),
+                      Qt::DirectConnection );
++            connect( engine, SIGNAL(trackLengthChanged( qint64) ),
++                     this, SLOT(currentTrackLengthChanged( qint64 )),
++                     Qt::DirectConnection );
+         }
+ 
+     public Q_SLOTS:
+@@ -70,7 +73,13 @@ class MetaStream::Track::Private : public QObject
+                 if( metaData.contains( Meta::Field::COMMENT ) )
+                     comment = metaData.value( Meta::Field::COMMENT ).toString();
+                 if( metaData.contains( Meta::Field::LENGTH ) )
+-                    length = metaData.value( Meta::Field::LENGTH ).value<qint64>();
++                {
++                    qint64 metaLength = metaData.value( Meta::Field::LENGTH ).value<qint64>();
++                    if (metaLength > 500)
++                    {
++                        length = metaLength;
++                    }
++                }
+ 
+                 //TODO: move special handling to subclass or using some configurable XSPF
+                 // Special demangling of artist/title for Shoutcast streams, which usually
+@@ -89,6 +98,17 @@ class MetaStream::Track::Private : public QObject
+             }
+         }
+ 
++        void currentTrackLengthChanged( qint64 milliseconds )
++        {
++            EngineController *engine = The::engineController();
++            if (milliseconds > 500 && length != milliseconds && engine && engine->currentTrack() && engine->currentTrack()->playableUrl() == url)
++            {
++                length = milliseconds;
++
++                track->notifyObservers();
++            }
++        }
++
+     public:
+         KUrl url;
+         QString title;
+-- 
+2.11.0
+
