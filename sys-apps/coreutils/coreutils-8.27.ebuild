@@ -1,6 +1,5 @@
-# Copyright 1999-2015 Gentoo Foundation
+# Copyright 1999-2017 Gentoo Foundation
 # Distributed under the terms of the GNU General Public License v2
-# $Id$
 
 # To generate the man pages, unpack the upstream tarball and run:
 # ./configure --enable-install-program=arch,coreutils,hostname,kill
@@ -8,18 +7,18 @@
 # cd ..
 # tar cf - coreutils-*/man/*.[0-9] | xz > coreutils-<ver>-man.tar.xz
 
-EAPI="4"
+EAPI="5"
 
 inherit eutils flag-o-matic toolchain-funcs
 
 PATCH_VER="1.0"
-DESCRIPTION="Standard GNU file utilities (chmod, cp, dd, dir, ls...), text utilities (sort, tr, head, wc..), and shell utilities (whoami, who,...)"
+DESCRIPTION="Standard GNU utilities (chmod, cp, dd, ls, sort, tr, head, wc, who,...)"
 HOMEPAGE="https://www.gnu.org/software/coreutils/"
 SRC_URI="mirror://gnu/${PN}/${P}.tar.xz
 	mirror://gentoo/${P}-patches-${PATCH_VER}.tar.xz
-	https://dev.gentoo.org/~vapier/dist/${P}-patches-${PATCH_VER}.tar.xz
+	https://dev.gentoo.org/~polynomial-c/dist/${P}-patches-${PATCH_VER}.tar.xz
 	mirror://gentoo/${P}-man.tar.xz
-	https://dev.gentoo.org/~vapier/dist/${P}-man.tar.xz"
+	https://dev.gentoo.org/~polynomial-c/dist/${P}-man.tar.xz"
 
 LICENSE="GPL-3"
 SLOT="0"
@@ -28,7 +27,7 @@ IUSE="acl caps gmp hostname kill multicall nls selinux static userland_BSD vanil
 
 LIB_DEPEND="acl? ( sys-apps/acl[static-libs] )
 	caps? ( sys-libs/libcap )
-	gmp? ( dev-libs/gmp[static-libs] )
+	gmp? ( dev-libs/gmp:=[static-libs] )
 	xattr? ( !userland_BSD? ( sys-apps/attr[static-libs] ) )"
 RDEPEND="!static? ( ${LIB_DEPEND//\[static-libs]} )
 	selinux? ( sys-libs/libselinux )
@@ -142,12 +141,15 @@ src_install() {
 	newins src/dircolors.hin DIR_COLORS
 
 	if [[ ${USERLAND} == "GNU" ]] ; then
-		cd "${ED}"/usr/bin
+		cd "${ED}"/usr/bin || die
 		dodir /bin
 		# move critical binaries into /bin (required by FHS)
 		local fhs="cat chgrp chmod chown cp date dd df echo false ln ls
 		           mkdir mknod mv pwd rm rmdir stty sync true uname"
 		mv ${fhs} ../../bin/ || die "could not move fhs bins"
+		if use kill; then
+			mv kill ../../bin/ || die
+		fi
 		# move critical binaries into /bin (common scripts)
 		local com="basename chroot cut dir dirname du env expr head mkfifo
 		           mktemp readlink seq sleep sort tail touch tr tty vdir wc yes"
