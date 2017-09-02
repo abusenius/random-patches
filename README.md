@@ -10,8 +10,6 @@ patches" feature of portage -- just copy/symlink the directories in this reposit
     /etc/portage/patches
 
 See also the [bugreport](http://bugs.gentoo.org/show_bug.cgi?id=349707#c11).
-Unfortunately, this method does not work with all ebuilds, in this case, I also provide a patched
-ebuild.
 
 
 Disclaimer:
@@ -43,6 +41,19 @@ Amarok
 
     Works with 2.7 - 2.8
 
+*   Fix removing duplicates from playlist (not reported yet)
+    
+    Remove duplicates based on playable URL because it works better for network streams.
+
+    Works with 2.7 - 2.8
+
+*   Improved correcting length of streams at playback (experimental, not reported yet)
+
+    Ignores too small lengths sometimes reported by web radio streams.  Updates length when the
+    backend reports length change.
+
+    Works with 2.7 - 2.8
+
 
 Coreutils
 ---------
@@ -55,9 +66,7 @@ Coreutils
     because the upstream did not want to accept it.
     I keep the patch up-to-date.
     
-    Coreutils ebuild does not apply user patches
-    
-    Works with 8.21 - 8.25
+    Works with 8.21 (older commits - ebuilds) - 8.28 (user patch support)
 
 
 NVidia Binary Drivers
@@ -65,6 +74,8 @@ NVidia Binary Drivers
 
 *   Fixes compilation issues of nvidia drivers version 355.11 when used with kernels 4.6.x.  Newer
     versions of nvidia drivers broke hibernation on my system.
+
+    *Discontinued after hardware upgrade.*
 
     Works with 355.11-r4
 
